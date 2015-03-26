@@ -28,7 +28,7 @@ use self::StorageType::{
     Unknown,
 };
 
-pub fn create_shader(gl: &gl::Gl, stage: s::Stage, data: &[u8])
+pub fn create_shader<Callback: Fn(String) -> ()>(gl: &gl::Gl, stage: s::Stage, data: &[u8], callback : Option<Callback>)
         -> (Result<super::Shader, s::CreateShaderError>, Option<String>) {
     let target = match stage {
         Stage::Vertex => gl::VERTEX_SHADER,
@@ -45,19 +45,23 @@ pub fn create_shader(gl: &gl::Gl, stage: s::Stage, data: &[u8])
     info!("\tCompiled shader {}", name);
 
     let status = get_shader_iv(gl, name, gl::COMPILE_STATUS);
-    let mut length = get_shader_iv(gl, name, gl::INFO_LOG_LENGTH);
 
-    let log = if length > 0 {
-        let mut log = String::with_capacity(length as usize);
-        log.extend(repeat('\0').take(length as usize));
-        unsafe {
-            gl.GetShaderInfoLog(name, length, &mut length,
-                (&log[..]).as_ptr() as *mut gl::types::GLchar);
-        }
-        log.truncate(length as usize);
-        Some(log)
-    } else {
-        None
+    match callback {
+        Some(cb) => {
+            let mut length = get_shader_iv(gl, name, gl::INFO_LOG_LENGTH);
+
+            if length > 0 {
+                let mut log = String::with_capacity(length as usize);
+                log.extend(repeat('\0').take(length as usize));
+                unsafe {
+                    gl.GetShaderInfoLog(name, length, &mut length,
+                        (&log[..]).as_ptr() as *mut gl::types::GLchar);
+                }
+                log.truncate(length as usize);
+                cb(log);
+            }
+        },
+        None => ()
     };
 
     let name = if status != 0 {
@@ -66,7 +70,7 @@ pub fn create_shader(gl: &gl::Gl, stage: s::Stage, data: &[u8])
         Err(CreateShaderError::ShaderCompilationFailed)
     };
 
-    (name, log)
+    name
 }
 
 fn get_shader_iv(gl: &gl::Gl, shader: super::Shader, query: gl::types::GLenum) -> gl::types::GLint {
