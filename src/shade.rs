@@ -282,9 +282,9 @@ fn query_parameters(gl: &gl::Gl, caps: &d::Capabilities, prog: super::Program)
     (uniforms, textures)
 }
 
-pub fn create_program<I: Iterator<Item = super::Shader>>(gl: &gl::Gl,
-                      caps: &d::Capabilities, shaders: I, targets: Option<&[&str]>)
-                      -> (Result<(::Program, s::ProgramInfo), ()>, Option<String>) {
+pub fn create_program<I: Iterator<Item = super::Shader>>(gl: &gl::Gl, caps: &d::Capabilities,
+                      shaders: I, targets: Option<&[&str]>, log: Option<&mut String>)
+                      -> Result<(::Program, s::ProgramInfo), ()> {
     let name = unsafe { gl.CreateProgram() };
     for sh in shaders {
         unsafe { gl.AttachShader(name, sh) };
@@ -311,24 +311,36 @@ pub fn create_program<I: Iterator<Item = super::Shader>>(gl: &gl::Gl,
             .collect::<Vec<_>>()[..]
         {
             [] => {},
-            unbound => return (Err(()), Some(format!("Unbound targets: {:?}", unbound))),
+            unbound => {
+                return match log {
+                    Some(log) => {
+                        log.push_str(&format!("Unbound targets: {:?}", unbound));
+                        Err(())
+                    },
+                    None => Err(())
+                }
+            }
         };
     }
 
-    // get info message
+    // get status
     let status = get_program_iv(gl, name, gl::LINK_STATUS);
-    let mut length  = get_program_iv(gl, name, gl::INFO_LOG_LENGTH);
-    let log = if length > 0 {
-        let mut log = String::with_capacity(length as usize);
-        log.extend(repeat('\0').take(length as usize));
-        unsafe {
-            gl.GetProgramInfoLog(name, length, &mut length,
-                (&log[..]).as_ptr() as *mut gl::types::GLchar);
+
+    // fetch the log if the buffer was provided
+    match log {
+        Some(log) => {
+            let mut length  = get_program_iv(gl, name, gl::INFO_LOG_LENGTH);
+            if length > 0 {
+                log.reserve(length as usize);
+                log.extend(repeat('\0').take(length as usize));
+                unsafe {
+                    gl.GetProgramInfoLog(name, length, &mut length,
+                        (&log[..]).as_ptr() as *mut gl::types::GLchar);
+                }
+                log.truncate(length as usize);
+            }
         }
-        log.truncate(length as usize);
-        Some(log)
-    } else {
-        None
+        None => ()
     };
 
     let prog = if status != 0 {
@@ -344,7 +356,7 @@ pub fn create_program<I: Iterator<Item = super::Shader>>(gl: &gl::Gl,
         Err(())
     };
 
-    (prog, log)
+    prog
 }
 
 pub fn bind_uniform(gl: &gl::Gl, loc: gl::types::GLint, uniform: UniformValue) {
